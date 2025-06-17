@@ -1,0 +1,6 @@
+r () {
+/opt/bitnami/scripts/postgresql-repmgr/entrypoint.sh repmgr -f /opt/bitnami/repmgr/conf/repmgr.conf $1 $2 $3 $4 $5 $6 $7 
+}
+if sed -i 's/\-v//g' /opt/bitnami/repmgr/conf/repmgr.conf > /dev/null 2>&1;then
+ echo ".bashrc: was executed command for removing -v flag (for ssh command) from repmgr.conf"
+fi

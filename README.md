@@ -1,4 +1,4 @@
-## Manager statefullsets like a PRO
+## Manage statefullsets like a PRO
 
 # 1. restore state
 ```
@@ -24,4 +24,31 @@ kubectl scale sts postgresql-ha-postgresql --replicas 0
 kubectl scale sts postgresql-ha-postgresql --replicas 2
 
 /opt/bitnami/scripts/postgresql-repmgr/entrypoint.sh repmgr -f   /opt/bitnami/repmgr/conf/repmgr.conf cluster show
+```
+
+
+
+#2. Prevent from deletion and automate protection deletioin using bash
+```
+2.1 manual labeling
+kubectl apply -f vap.yaml
+kubectl label pod postgresql-ha-postgresql-0 forbid-deletion=true --overwrite
+k delete po postgresql-ha-postgresql-0
+
+2.2 automatic labeling using bash
+kubectl apply -f sts-check.yaml
+
+2.3 postgresql switchover
+k exec -it postgresql-ha-postgresql-1 -- bash
+r cluster show
+k exec -it postgresql-ha-postgresql-1 -- bash
+r standby switchover -L DEBUG -v
+
+2.4 redis switchover
+k exec -it redis-ha2-server-0 -c sentinel -- redis-cli -p 26379
+sentinel failover mymaster
+
+2.5 automatic labeling using GO
+#github label-operator
+#github beastlex probes
 ```

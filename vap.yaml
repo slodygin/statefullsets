@@ -1,0 +1,29 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: "deletion-protection"
+spec:
+  policyName: "deletion-protection"
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector: {}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: "deletion-protection"
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups:   ["*"]
+        apiVersions: ["*"]
+        operations:  ["DELETE"]
+        resources:   ["*"]
+  matchConditions:
+    - name: 'protectedFromDeletion'
+      expression: "has(oldObject.metadata.labels) && 'forbid-deletion' in oldObject.metadata.labels"
+  validations:
+    - expression: "!(oldObject.metadata.labels['forbid-deletion'] == 'true')"
+      messageExpression: "'Object is protected by deletion-protection ValidatingAdmissionPolicy, set label forbid-deletion to false'"
+      reason: Forbidden
