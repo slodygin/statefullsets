@@ -35,15 +35,16 @@ spec:
             - ALL
         env:
           - name: INCREMENT
-            value: "31"
+            value: "35"
           - name: NODE_NAME
             valueFrom:
               fieldRef:
                 fieldPath: spec.nodeName
           - name: POD_ARRAY
             value: |
-               postgresql-ha-postgresql,postgresql,yes,9187
-               redis-ha2-server,redis,yes,9121
+              "ubuntu,ubuntu,yes,1048576,,
+               postgresql-ha-postgresql,postgresql,yes,1048576,yes,9187
+               redis-ha2-server,redis,yes,1048676,yes,9121"
         volumeMounts:
           - mountPath: "/root/.kube/config"
             name: kubectl-config
@@ -58,6 +59,12 @@ spec:
             readOnly: false
           - mountPath: "/var/lib/docker"
             name: docker-directory
+            readOnly: false
+          - mountPath: "/sys"
+            name: sys
+            readOnly: false
+          - mountPath: "/proc"
+            name: proc
             readOnly: false
       volumes:
         - name: kubectl-config
@@ -74,6 +81,12 @@ spec:
         - name: docker-directory
           hostPath:
             path: "/var/lib/docker"
+        - name: sys
+          hostPath:
+            path: "/sys"
+        - name: proc
+          hostPath:
+            path: "/proc"
 ---
 kind: ConfigMap
 metadata:
@@ -83,27 +96,40 @@ data:
   sts-check.sh: |
     #!/bin/bash
     echo "$(date) test"
-    echo "NODE_NAME=$NODE_NAME POD_ARRAY=$POD_ARRAY" 
+    echo "NODE_NAME=$NODE_NAME POD_ARRAY=$POD_ARRAY"
     for i in $(echo $POD_ARRAY|sed 's/"//g');do
       POD=$(echo $i |awk -F, '{print $1}')
       CONTAINER=$(echo $i |awk -F, '{print $2}')
-      ADD_ANNOTATION=$(echo $i |awk -F, '{print $3}')
-      PORT_TO_CHECK=$(echo $i |awk -F, '{print $4}')
-      echo "POD=$POD CONTAINER=$CONTAINER ADD_ANNOTATION=$ADD_ANNOTATION PORT_TO_CHECK=$PORT_TO_CHECK"
-      currentPods=$(kubectl get pods -n default -o wide --no-headers |grep ${POD}|grep ${NODE_NAME} |awk '{print $1}')
+      ADD_WBPS=$(echo $i |awk -F, '{print $3}')
+      WBPS=$(echo $i |awk -F, '{print $4}')
+      ADD_ANNOTATION=$(echo $i |awk -F, '{print $5}')
+      PORT_TO_CHECK=$(echo $i |awk -F, '{print $6}')
+      echo "POD=$POD CONTAINER=$CONTAINER ADD_WBPS=$ADD_WBPS WBPS=$WBPS ADD_ANNOTATION=$ADD_ANNOTATION PORT_TO_CHECK=$PORT_TO_CHECK"
+      currentPods=$(kubectl get pods -n default -o wide -o custom-columns=:metadata.name,:status.qosClass,:spec.nodeName --no-headers |grep ${POD}|grep ${NODE_NAME} |awk '{print $1","$2}')
       echo "currentPods=$currentPods"
       for i in $currentPods; do
+        POD=$(echo $i |awk -F, '{print $1}')
+        CLASS=$(echo $i |awk -F, '{print $2}'| tr '[:upper:]' '[:lower:]')
+        PID=$(docker inspect $(docker ps |grep ${CONTAINER}_${POD}|awk '{print $1}') |grep "\"Pid\""|awk '{print $2}'  |sed 's/,//')
+        CGROUP=$(cat /proc/$PID/cgroup |sed 's/0:://g'| sed 's/\/\.\.//g')
+        CGROUP="/kubepods.slice/kubepods-${CLASS}.slice/$CGROUP"
+        DISKID=$(lsblk |grep "^vda" |awk '{print $2}')
+        echo "we found in pod $POD pid $PID and CGROUP=$CGROUP DISKID=$DISKID"
+        if [ "$ADD_WBPS" == "yes" ] && [ -f /sys/fs/cgroup/$CGROUP/io.max ] && [ -f /proc/$PID/cgroup ]; then
+          echo "CGROUP=$CGROUP"
+          echo "$DISKID wbps=$WBPS"> /sys/fs/cgroup/$CGROUP/io.max
+        fi
         #postgresql
         if [ "$ADD_ANNOTATION" == "yes" ] && echo $POD | grep postgresql 2>/dev/null 1>/dev/null; then
           podsToCheck=$(kubectl get pods -o wide -o custom-columns=:metadata.name,:status.podIP,:status.phase |grep $POD | grep Running |awk '{print $1","$2}')
-          for j in $(echo $podsToCheck);do 
+          for j in $(echo $podsToCheck);do
             POD_NAME=$(echo $j |awk -F, '{print $1}')
             IP=$(echo $j |awk -F, '{print $2}')
             IS_MASTER=$(curl -s $IP:$PORT_TO_CHECK/metrics |grep "^pg_replication_is_replica" |awk '{print $2}')
             if [ "$IS_MASTER" == "0" ];then
               echo "label $POD_NAME true"
               kubectl label pod $POD_NAME forbid-deletion="true" --overwrite
-            else  
+            else
               echo "label $POD_NAME false"
               kubectl label pod $POD_NAME forbid-deletion="false" --overwrite
             fi
@@ -112,20 +138,20 @@ data:
         #redis
         if [ "$ADD_ANNOTATION" == "yes" ] && echo $POD | grep redis 2>/dev/null 1>/dev/null; then
           podsToCheck=$(kubectl get pods -o wide -o custom-columns=:metadata.name,:status.podIP,:status.phase |grep $POD | grep Running |awk '{print $1","$2}')
-          for j in $(echo $podsToCheck);do 
+          for j in $(echo $podsToCheck);do
             POD_NAME=$(echo $j |awk -F, '{print $1}')
             IP=$(echo $j |awk -F, '{print $2}')
             IS_MASTER=$(curl -s $IP:$PORT_TO_CHECK/metrics |grep "^redis_instance_info" |sed 's/.*role="\([a-z]*\)".*/\1/g')
             if [ "$IS_MASTER" == "master" ];then
               echo "label $POD_NAME true"
               kubectl label pod $POD_NAME forbid-deletion="true" --overwrite
-            else  
+            else
               echo "label $POD_NAME false"
               kubectl label pod $POD_NAME forbid-deletion="false" --overwrite
             fi
           done
         fi
-      done 
+      done
     done
     #k annotate pod my-nginx forbid-deletion="true" --overwrite
 ---
