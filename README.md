@@ -109,3 +109,83 @@ k run ubuntu --image=ubuntu -- bash -c "sleep 5000"
 #github label-operator
 #github beastlex probes
 ```
+
+# 4. VMs in clouds with high IO
+```
+#4.1 IOPS
+#provider    cpu/mem/disk      random  write read
+hetzner ax51 16/64/1Tbnvme              96K  301K
+hetzner ax41 12/64/512nvme              76K  200k
+hetzner ax41 separate 512nvme           107k 349k
+hetzner ax41 separate 512nvme k8s+openebs+hostpath 63k 140k
+hetzner vm 8/32/160                     36K  52.9K
+selectel 8/64/480  sata                 34K  91К
+selectel 12/128/480  sata               40k  106k
+selectel vm hdd 4/8/100gb               6K   13K
+
+aws gp3       (/mnt)    42k 42k
+aws localssd  (/mnt2)   100k 170k
+
+gcp balanced pd(/mnt)   71k  74K
+gcp localssd   (/mnt2)  100k 180k
+
+laptop                  71k  121k
+
+#4.2 speed test
+fio --randrepeat=1 --ioengine=libaio --direct=1 --gtod_reduce=1 --name=test --filename=test_file.tmp --bs=4k --iodepth=64 --size=100Mb --readwrite=randwrite;rm -f test_file.tmp
+fio --randrepeat=1 --ioengine=libaio --direct=1 --gtod_reduce=1 --name=test --filename=test_file.tmp --bs=4k --iodepth=64 --size=100Mb --readwrite=randread;rm -f test_file.tmp
+
+#4.3 IOPS in clouds
+m6id.large           2CPU/8GB   108GB ssdlocal + 119GB gp3           $128
+c3-standard-4-lssd   4CPU/16GB  375GB ssdlocal + 376GB balanced pd   $149
+
+
+#4.4 aws
+yum install -y fio mdadm
+mkdir /mnt2 /mnt3
+mkfs.ext4 /dev/nvme2n1
+mkfs.ext4 /dev/nvme1n1
+mount /dev/nvme2n1 /mnt
+mount /dev/nvme1n1 /mnt2
+cd /mnt/
+umount /mnt /mnt2
+mdadm --create --level=1 --raid-devices=2 /dev/md0 /dev/nvme1n1 --write-mostly /dev/nvme2n1
+mkfs.ext4 /dev/md0
+mount /dev/md0 /mnt3
+cd /mnt3
+
+
+#4.5 gcp
+apt-get update ; apt-get install -y fio mdadm
+mkdir /mnt2 /mnt3
+mkfs.ext4 /dev/nvme1n1
+mkfs.ext4 /dev/nvme0n2
+mount /dev/nvme0n2 /mnt
+mount /dev/nvme1n1 /mnt2
+cd /mnt/
+umount /mnt /mnt2
+mdadm --create --level=1 --raid-devices=2 /dev/md0 /dev/nvme1n1 --write-mostly /dev/nvme0n2
+mkfs.ext4 /dev/md0
+mount /dev/md0 /mnt3
+cd /mnt3
+
+
+
+#4.5 gcp
+apt-get update ; apt-get install -y fio mdadm
+mkdir /mnt2 /mnt3
+mkfs.ext4 /dev/nvme1n1
+mkfs.ext4 /dev/nvme0n2
+mount /dev/nvme0n2 /mnt
+mount /dev/nvme1n1 /mnt2
+cd /mnt/
+umount /mnt /mnt2
+mdadm --create --level=1 --raid-devices=2 /dev/md0 /dev/nvme1n1 --write-mostly /dev/nvme0n2
+mkfs.ext4 /dev/md0
+mount /dev/md0 /mnt3
+cd /mnt3
+
+
+#4.6 software raid in big enterprises
+https://discord.com/blog/how-discord-supercharges-network-disks-for-extreme-low-latency
+```
